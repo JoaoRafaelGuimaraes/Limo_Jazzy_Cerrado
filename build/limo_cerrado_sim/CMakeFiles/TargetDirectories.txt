@@ -1,0 +1,9 @@
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/uninstall.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/limo_cerrado_sim_uninstall.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/test.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/edit_cache.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/rebuild_cache.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/list_install_components.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/install.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/install/local.dir
+/root/limo_ws/build/limo_cerrado_sim/CMakeFiles/install/strip.dir

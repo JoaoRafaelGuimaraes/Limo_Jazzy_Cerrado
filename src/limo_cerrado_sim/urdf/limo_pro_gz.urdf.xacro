@@ -1,0 +1,489 @@
+<?xml version="1.0"?>
+<!--
+  AgileX LIMO Pro para Gazebo Harmonic (gz-sim 8) + ROS 2 Jazzy.
+
+  Base: repositorio oficial agilexrobotics/limo_ros2, pacote limo_description (clone intocado).
+  Deste arquivo oficial sao reaproveitados, sem alteracao: as macros limo_wheel / limo_laser /
+  limo_depth_camera / limo_imu, os meshes, a geometria (entre-eixos 0.2 m, bitola 0.175 m, raio
+  de roda 0.045 m), as massas, a inercia e a caixa de colisao da base.
+
+  Este arquivo espelha o limo_four_diff.xacro oficial. O que ele troca, por necessidade:
+    - plugins: os oficiais sao do Gazebo Classic (libgazebo_ros_*) e nao existem no Harmonic.
+    - pose da camera: o limo_ros2 traz z=0.3 (camera a 45 cm, acima do robo); o outro repo oficial
+      (ugv_gazebo_sim) traz z=0.03, que bate com o mesh. Usado 0.03.
+  O que ele acrescenta:
+    - Livox MID-360 (use_livox), aproximado com gpu_lidar.
+    - mode:=track  conjunto de esteiras no lugar das quatro rodas (o LIMO real tem modo esteira;
+                   a AgileX nao publica URDF dele). Mesmos eixos, mesma bitola, mesma massa.
+    - mode:=diff   quatro rodas do modelo oficial.
+  Opcionais, desligados por padrao (desvios do modelo oficial):
+    - physical_inertia:=true    inercia de caixa homogenea em vez da oficial (que e ~10x maior).
+    - detailed_collision:=true  duas caixas que seguem o mesh (vao livre de 25 mm) em vez da caixa
+                                oficial de 13 x 12 x 10 cm.
+-->
+<robot name="limo_pro" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="mode"               default="track"/>
+  <xacro:arg name="use_livox"          default="true"/>
+  <xacro:arg name="use_lidar2d"        default="true"/>
+  <xacro:arg name="use_camera"         default="false"/>
+  <xacro:arg name="physical_inertia"   default="false"/>
+  <xacro:arg name="detailed_collision" default="false"/>
+  <!-- modo diff: "skid" = atrito lateral reduzido no eixo da roda (padrao); "official" = atrito do URDF
+       oficial (mu=100, ajustado para o Gazebo Classic). Medido no Harmonic/DART com o atrito oficial:
+       o robo NAO gira no lugar (0.00 rad/s para 1.0 comandado) e faz arcos a 25% do comandado. -->
+  <xacro:arg name="wheel_friction"     default="skid"/>
+  <!-- modo track: fracao do giro comandado que sobra depois da patinagem. Medido neste terreno:
+       com 0.5 (padrao do gz) o robo gira 1.5x o comandado; com 0.7 fica em ~1.0x parado e ~0.7x em arco. -->
+  <xacro:arg name="steering_efficiency" default="0.7"/>
+  <!-- origem da nuvem do MID-360 em relacao ao base_link (que fica 0.15 m acima do solo).
+       Padrao: sensor apoiado no topo da carenagem (0.254 m) + 0.047 m ate o centro optico. -->
+  <xacro:arg name="livox_xyz" default="0.0 0.0 0.151"/>
+  <xacro:arg name="livox_rpy" default="0 0 0"/>
+  <xacro:arg name="livox_h_samples" default="500"/>
+  <xacro:arg name="livox_v_samples" default="40"/>
+  <xacro:arg name="livox_rate"      default="10"/>
+
+  <xacro:include filename="$(find limo_description)/urdf/limo_xacro.xacro"/>
+
+  <!-- mesmas propriedades do limo_four_diff.xacro oficial (as macros dependem delas) -->
+  <xacro:property name="M_PI" value="3.14159"/>
+  <xacro:property name="base_x_size" value="0.13"/>
+  <xacro:property name="base_y_size" value="0.12"/>
+  <xacro:property name="base_z_size" value="0.1"/>
+  <xacro:property name="wheelbase" value="0.2"/>
+  <xacro:property name="track" value="0.13"/>
+  <xacro:property name="wheel_vertical_offset" value="-0.10"/>
+  <xacro:property name="base_mass" value="2.1557"/>
+  <xacro:property name="wheel_length" value="0.045"/>
+  <xacro:property name="wheel_radius" value="0.045"/>
+  <xacro:property name="wheel_mass" value="0.5"/>
+  <xacro:property name="mode" value="$(arg mode)"/>
+
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 -0.15" rpy="0 0 1.57"/>
+      <geometry>
+        <mesh filename="file://$(find limo_description)/meshes/limo_base.dae" scale="1 1 1"/>
+      </geometry>
+    </visual>
+    <xacro:unless value="$(arg detailed_collision)">
+      <!-- caixa de colisao oficial -->
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><box size="${base_x_size} ${base_y_size} ${base_z_size}"/></geometry>
+      </collision>
+    </xacro:unless>
+    <xacro:if value="$(arg detailed_collision)">
+      <collision name="chassis_lower">
+        <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+        <geometry><box size="0.30 0.12 0.07"/></geometry>
+      </collision>
+      <collision name="chassis_upper">
+        <origin xyz="0 0 0.025" rpy="0 0 0"/>
+        <geometry><box size="0.30 0.19 0.15"/></geometry>
+      </collision>
+    </xacro:if>
+  </link>
+
+  <link name="inertial_link">
+    <xacro:unless value="$(arg physical_inertia)">
+      <!-- inercia oficial -->
+      <inertial>
+        <origin xyz="0.0 0.0 0.0"/>
+        <mass value="${base_mass}"/>
+        <inertia ixx="0.24" ixy="0" ixz="0" iyy="0.96" iyz="0" izz="0.96"/>
+      </inertial>
+    </xacro:unless>
+    <xacro:if value="$(arg physical_inertia)">
+      <inertial>
+        <origin xyz="0 0 -0.05"/>
+        <mass value="${base_mass}"/>
+        <inertia ixx="0.0160" ixy="0" ixz="0" iyy="0.0279" iyz="0" izz="0.0249"/>
+      </inertial>
+    </xacro:if>
+  </link>
+  <joint name="inertial_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="inertial_link"/>
+  </joint>
+
+  <!-- ===== sensores de fabrica: macros e poses oficiais ===== -->
+  <xacro:limo_laser parent_prefix="base_link" frame_prefix="laser">
+    <origin xyz="0.103 0 -0.034" rpy="0 0 0"/>
+  </xacro:limo_laser>
+
+  <xacro:limo_depth_camera parent_prefix="base_link" frame_prefix="depth_camera">
+    <origin xyz="0.084 0 0.03" rpy="0 0 0"/>
+  </xacro:limo_depth_camera>
+
+  <xacro:limo_imu parent_prefix="base_link" frame_prefix="imu">
+    <origin xyz="0.0 0 -0.1" rpy="0 0 0"/>
+  </xacro:limo_imu>
+
+  <!-- =====================================================================================
+       LOCOMOCAO: mode:=diff  (quatro rodas, modelo oficial)
+       ===================================================================================== -->
+  <xacro:if value="${mode == 'diff'}">
+    <xacro:limo_wheel parent_prefix="base_link" wheel_prefix="front_left" reflect="1">
+      <origin xyz="${wheelbase/2} ${track/2} ${wheel_vertical_offset}" rpy="0 0 0"/>
+    </xacro:limo_wheel>
+    <xacro:limo_wheel parent_prefix="base_link" wheel_prefix="front_right" reflect="-1">
+      <origin xyz="${wheelbase/2} ${-track/2} ${wheel_vertical_offset}" rpy="${M_PI} 0 0"/>
+    </xacro:limo_wheel>
+    <xacro:limo_wheel parent_prefix="base_link" wheel_prefix="rear_left" reflect="1">
+      <origin xyz="${-wheelbase/2} ${track/2} ${wheel_vertical_offset}" rpy="0 0 0"/>
+    </xacro:limo_wheel>
+    <xacro:limo_wheel parent_prefix="base_link" wheel_prefix="rear_right" reflect="-1">
+      <origin xyz="${-wheelbase/2} ${-track/2} ${wheel_vertical_offset}" rpy="${M_PI} 0 0"/>
+    </xacro:limo_wheel>
+
+    <xacro:macro name="wheel_surface" params="prefix">
+      <gazebo reference="${prefix}_wheel_link">
+        <xacro:if value="${'$(arg wheel_friction)' == 'official'}">
+          <!-- valores do limo_four_diff.xacro oficial -->
+          <mu1>100</mu1>
+          <mu2>100</mu2>
+          <kp>10000000.0</kp>
+          <kd>1.0</kd>
+          <minDepth>0.01</minDepth>
+          <fdir1>1 0 0</fdir1>
+        </xacro:if>
+        <xacro:if value="${'$(arg wheel_friction)' == 'skid'}">
+          <!-- atrito lateral menor ao longo do eixo da roda. fdir1 e expresso no frame da colisao,
+               e o macro oficial gira o cilindro 90 graus em x: ali o eixo da roda e z. -->
+          <fdir1>0 0 1</fdir1>
+          <mu1>0.5</mu1>
+          <mu2>1.0</mu2>
+        </xacro:if>
+      </gazebo>
+    </xacro:macro>
+    <xacro:wheel_surface prefix="front_left"/>
+    <xacro:wheel_surface prefix="front_right"/>
+    <xacro:wheel_surface prefix="rear_left"/>
+    <xacro:wheel_surface prefix="rear_right"/>
+
+    <gazebo>
+      <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+        <left_joint>front_left_wheel</left_joint>
+        <left_joint>rear_left_wheel</left_joint>
+        <right_joint>front_right_wheel</right_joint>
+        <right_joint>rear_right_wheel</right_joint>
+        <wheel_separation>0.172</wheel_separation> <!-- valor do plugin oficial -->
+        <wheel_radius>0.045</wheel_radius>
+        <max_linear_velocity>1.0</max_linear_velocity>
+        <min_linear_velocity>-1.0</min_linear_velocity>
+        <max_angular_velocity>3.0</max_angular_velocity>
+        <min_angular_velocity>-3.0</min_angular_velocity>
+        <max_linear_acceleration>2.0</max_linear_acceleration>
+        <min_linear_acceleration>-2.0</min_linear_acceleration>
+        <topic>/model/limo/cmd_vel</topic>
+        <odom_topic>/model/limo/odom</odom_topic>
+        <tf_topic>/model/limo/tf</tf_topic>
+        <frame_id>odom</frame_id>
+        <child_frame_id>base_footprint</child_frame_id>
+        <odom_publish_frequency>50</odom_publish_frequency>
+      </plugin>
+      <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+        <topic>/model/limo/joint_states</topic>
+        <joint_name>front_left_wheel</joint_name>
+        <joint_name>front_right_wheel</joint_name>
+        <joint_name>rear_left_wheel</joint_name>
+        <joint_name>rear_right_wheel</joint_name>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <!-- =====================================================================================
+       LOCOMOCAO: mode:=track  (esteiras)
+       Cada esteira envolve as duas rodas de um lado: caixa entre os eixos + um cilindro em cada
+       eixo, raio 0.05 m (roda de 0.045 + 5 mm de borracha), largura da roda oficial. A massa de
+       cada esteira e a das duas rodas que ela substitui, entao a massa total nao muda.
+       As rodas oficiais continuam como visual, sem colisao e sem girar.
+       ===================================================================================== -->
+  <xacro:if value="${mode == 'track'}">
+    <xacro:property name="belt_radius" value="0.05"/>
+
+    <xacro:macro name="static_wheel" params="prefix *joint_pose">
+      <link name="${prefix}_wheel_link">
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry>
+            <mesh filename="file://$(find limo_description)/meshes/limo_wheel.dae"/>
+          </geometry>
+        </visual>
+      </link>
+      <joint name="${prefix}_wheel" type="fixed">
+        <parent link="base_link"/>
+        <child link="${prefix}_wheel_link"/>
+        <xacro:insert_block name="joint_pose"/>
+      </joint>
+    </xacro:macro>
+    <xacro:static_wheel prefix="front_left"><origin xyz="${wheelbase/2} ${track/2} ${wheel_vertical_offset}" rpy="0 0 0"/></xacro:static_wheel>
+    <xacro:static_wheel prefix="front_right"><origin xyz="${wheelbase/2} ${-track/2} ${wheel_vertical_offset}" rpy="${M_PI} 0 0"/></xacro:static_wheel>
+    <xacro:static_wheel prefix="rear_left"><origin xyz="${-wheelbase/2} ${track/2} ${wheel_vertical_offset}" rpy="0 0 0"/></xacro:static_wheel>
+    <xacro:static_wheel prefix="rear_right"><origin xyz="${-wheelbase/2} ${-track/2} ${wheel_vertical_offset}" rpy="${M_PI} 0 0"/></xacro:static_wheel>
+
+    <xacro:macro name="limo_track" params="side reflect">
+      <!-- visuais e colisoes SEM atributo name: o conversor URDF->SDF do gz so aplica mu/mu2/fdir1
+           (tags <gazebo reference>) a colisoes sem nome explicito. -->
+      <link name="${side}_track">
+        <inertial>
+          <origin xyz="0 0 0"/>
+          <mass value="${2*wheel_mass}"/>
+          <!-- caixa 0.30 x 0.045 x 0.10 m -->
+          <inertia ixx="${2*wheel_mass/12*(0.045**2+0.10**2)}" ixy="0" ixz="0"
+                   iyy="${2*wheel_mass/12*(0.30**2+0.10**2)}" iyz="0"
+                   izz="${2*wheel_mass/12*(0.30**2+0.045**2)}"/>
+        </inertial>
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="${wheelbase} ${wheel_length+0.004} ${2*belt_radius}"/></geometry>
+          <material name="rubber"><color rgba="0.05 0.05 0.05 1"/></material>
+        </visual>
+        <visual>
+          <origin xyz="${wheelbase/2} 0 0" rpy="1.5708 0 0"/>
+          <geometry><cylinder radius="${belt_radius}" length="${wheel_length+0.004}"/></geometry>
+          <material name="rubber"/>
+        </visual>
+        <visual>
+          <origin xyz="${-wheelbase/2} 0 0" rpy="1.5708 0 0"/>
+          <geometry><cylinder radius="${belt_radius}" length="${wheel_length+0.004}"/></geometry>
+          <material name="rubber"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="${wheelbase} ${wheel_length} ${2*belt_radius}"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="${wheelbase/2} 0 0" rpy="1.5708 0 0"/>
+          <geometry><cylinder radius="${belt_radius}" length="${wheel_length}"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="${-wheelbase/2} 0 0" rpy="1.5708 0 0"/>
+          <geometry><cylinder radius="${belt_radius}" length="${wheel_length}"/></geometry>
+        </collision>
+      </link>
+      <joint name="${side}_track_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="${side}_track"/>
+        <!-- centro da esteira = meio da largura da roda oficial (bitola efetiva 0.175 m) -->
+        <origin xyz="0 ${reflect*(track/2 + wheel_length/2)} ${wheel_vertical_offset}" rpy="0 0 0"/>
+      </joint>
+      <!-- a esteira precisa continuar sendo um link proprio: o TrackController atua por link -->
+      <gazebo reference="${side}_track_joint">
+        <preserveFixedJoint>true</preserveFixedJoint>
+      </gazebo>
+      <!-- mesmo esquema de atrito do exemplo oficial de esteiras do gz-sim: mu lateral, mu2 ao longo -->
+      <gazebo reference="${side}_track">
+        <mu1>0.7</mu1>
+        <mu2>150</mu2>
+        <fdir1>0 1 0</fdir1>
+      </gazebo>
+    </xacro:macro>
+    <xacro:limo_track side="left"  reflect="1"/>
+    <xacro:limo_track side="right" reflect="-1"/>
+
+    <gazebo>
+      <plugin filename="gz-sim-tracked-vehicle-system" name="gz::sim::systems::TrackedVehicle">
+        <left_track><link>left_track</link></left_track>
+        <right_track><link>right_track</link></right_track>
+        <tracks_separation>0.175</tracks_separation>
+        <tracks_height>0.10</tracks_height>
+        <steering_efficiency>$(arg steering_efficiency)</steering_efficiency>
+        <linear_velocity><min_velocity>-1.0</min_velocity><max_velocity>1.0</max_velocity></linear_velocity>
+        <angular_velocity><min_velocity>-3.0</min_velocity><max_velocity>3.0</max_velocity></angular_velocity>
+        <topic>/model/limo/cmd_vel</topic>
+        <odom_topic>/model/limo/odom</odom_topic>
+        <tf_topic>/model/limo/tf</tf_topic>
+        <frame_id>odom</frame_id>
+        <child_frame_id>base_footprint</child_frame_id>
+        <odom_publish_frequency>50</odom_publish_frequency>
+      </plugin>
+      <plugin filename="gz-sim-track-controller-system" name="gz::sim::systems::TrackController">
+        <link>left_track</link>
+        <min_velocity>-1.5</min_velocity>
+        <max_velocity>1.5</max_velocity>
+      </plugin>
+      <plugin filename="gz-sim-track-controller-system" name="gz::sim::systems::TrackController">
+        <link>right_track</link>
+        <min_velocity>-1.5</min_velocity>
+        <max_velocity>1.5</max_velocity>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <!-- pose verdadeira no mundo (3D), para comparar com a odometria e com SLAM/LIO -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>world</odom_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <odom_topic>/model/limo/ground_truth/odom</odom_topic>
+      <tf_topic>/model/limo/ground_truth/tf</tf_topic>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <dimensions>3</dimensions>
+    </plugin>
+  </gazebo>
+
+  <!-- ===== Livox MID-360 ===== -->
+  <xacro:if value="$(arg use_livox)">
+    <link name="livox_frame">
+      <inertial>
+        <origin xyz="0 0 -0.017"/>
+        <mass value="0.265"/>
+        <inertia ixx="1.7e-4" ixy="0" ixz="0" iyy="1.7e-4" iyz="0" izz="1.9e-4"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 -0.017" rpy="0 0 0"/>
+        <geometry><box size="0.065 0.065 0.060"/></geometry>
+        <material name="livox_grey"><color rgba="0.15 0.15 0.17 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 -0.017" rpy="0 0 0"/>
+        <geometry><box size="0.065 0.065 0.060"/></geometry>
+      </collision>
+    </link>
+    <joint name="livox_joint" type="fixed">
+      <origin xyz="$(arg livox_xyz)" rpy="$(arg livox_rpy)"/>
+      <parent link="base_link"/>
+      <child link="livox_frame"/>
+    </joint>
+
+    <gazebo reference="livox_frame">
+      <!--
+        MID-360: 360 x 59 graus (-7 a +52), 0.1 a 40 m (10% de refletividade), 10 Hz,
+        ~200 mil pontos/s => ~20 mil por quadro (500 x 40). O gz-sim so varre em grade uniforme:
+        o padrao nao repetitivo (roseta) do sensor real NAO e reproduzido.
+      -->
+      <sensor name="livox_mid360" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <topic>livox/lidar</topic>
+        <gz_frame_id>livox_frame</gz_frame_id>
+        <update_rate>$(arg livox_rate)</update_rate>
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>$(arg livox_h_samples)</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>$(arg livox_v_samples)</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.12217</min_angle>
+              <max_angle>0.90757</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.1</min>
+            <max>40.0</max>
+            <resolution>0.002</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+      <!-- IMU interna do MID-360 (ICM40609), 200 Hz. Sai em m/s^2; o driver real publica em g. -->
+      <sensor name="livox_imu" type="imu">
+        <topic>livox/imu</topic>
+        <gz_frame_id>livox_frame</gz_frame_id>
+        <update_rate>200</update_rate>
+        <always_on>true</always_on>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>1.0e-3</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>1.0e-3</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>1.0e-3</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>2.0e-2</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>2.0e-2</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>2.0e-2</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <!-- ===== lidar 2D de fabrica do LIMO Pro: EAI T-mini Pro (360 graus, 0.54 grau, 12 m) ===== -->
+  <xacro:if value="$(arg use_lidar2d)">
+    <gazebo reference="laser_link">
+      <sensor name="tmini_pro" type="gpu_lidar">
+        <topic>scan</topic>
+        <gz_frame_id>laser_link</gz_frame_id>
+        <update_rate>10</update_rate>
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>667</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+          </scan>
+          <!-- min 0.25 m: abaixo disso os raios so veriam a propria carenagem -->
+          <range><min>0.25</min><max>12.0</max><resolution>0.01</resolution></range>
+          <noise><type>gaussian</type><mean>0.0</mean><stddev>0.01</stddev></noise>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <!-- IMU de fabrica (HI226), 100 Hz, mesmo ruido do modelo oficial -->
+  <gazebo reference="imu_link">
+    <sensor name="hi226_imu" type="imu">
+      <topic>imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+      <update_rate>100</update_rate>
+      <always_on>true</always_on>
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+    </sensor>
+  </gazebo>
+
+  <!-- ===== camera de profundidade de fabrica: Orbbec Dabai (640x400, 67.9 graus, 0.3 a 3 m) ===== -->
+  <xacro:if value="$(arg use_camera)">
+    <gazebo reference="depth_camera_link">
+      <sensor name="dabai" type="rgbd_camera">
+        <topic>camera</topic>
+        <gz_frame_id>depth_link</gz_frame_id>
+        <update_rate>15</update_rate>
+        <always_on>true</always_on>
+        <camera>
+          <horizontal_fov>1.1851</horizontal_fov>
+          <image><width>640</width><height>400</height><format>R8G8B8</format></image>
+          <clip><near>0.05</near><far>60.0</far></clip>
+          <depth_camera><clip><near>0.3</near><far>3.0</far></clip></depth_camera>
+        </camera>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+</robot>

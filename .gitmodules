@@ -1,0 +1,3 @@
+[submodule "src/limo_ros2"]
+	path = src/limo_ros2
+	url = https://github.com/agilexrobotics/limo_ros2
