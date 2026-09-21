@@ -85,48 +85,6 @@ Nao vem de sensor nem de estimador. O motor de fisica do Gazebo conhece a pose e
 
 Pose medida depois de o robo assentar no spawn padrao: x = -13,000, y = 11,500, z = 1,474 m, roll = 0,1, pitch = -1,1, yaw = -41,5 graus. Como o spawn e configuravel e o robo assenta alguns milimetros, **nao use esses numeros fixos na avaliacao: use a primeira mensagem de `/ground_truth/odom` como pose inicial.**
 
-### A transformada obrigatoria
-
-Um SLAM/LIO nao conhece o `world`. Ele estima a pose do **seu** corpo (normalmente o lidar/IMU, aqui `livox_frame`) em relacao ao **seu** mapa, cuja origem e onde o algoritmo foi iniciado. Comparar isso direto com `/ground_truth/odom` da um erro enorme que nao e do algoritmo: no spawn padrao, 13 m em x, 11,5 m em y, 1,5 m em z e 41 graus de yaw. Sao duas correcoes:
-
-1. **Braco do sensor.** A pose verdadeira e do `base_footprint`; o lidar fica 0,301 m acima, sem rotacao (`livox_xyz` padrao `0 0 0.151` sobre o `base_link`, que esta 0,15 m acima do `base_footprint`). Em terreno inclinado esse braco desloca o lidar na horizontal: 8,8 cm com 17 graus de inclinacao.
-
-       T_world_lidar(t) = T_world_base(t) * T_base_lidar,   T_base_lidar = translacao (0, 0, 0.301)
-
-2. **Origem do mapa.** Leve a trajetoria verdadeira para o referencial do algoritmo usando a pose verdadeira do lidar no instante t0 em que ele iniciou:
-
-       T_mapa_lidar_verdadeira(t) = inv(T_world_lidar(t0)) * T_world_lidar(t)
-
-   Se o algoritmo alinha o mapa com a gravidade (z do mapa na vertical, caso do `gravity_align` do Point-LIO), use em `T_world_lidar(t0)` so a posicao e o yaw, com roll e pitch zerados. No spawn padrao a diferenca e de 1 grau; numa ladeira de 17 graus nao e desprezivel.
-
-Exemplo em Python (`scipy`), com `gt` = lista de (t, x, y, z, qx, qy, qz, qw) lida de `/ground_truth/odom`:
-
-```python
-import numpy as np
-from scipy.spatial.transform import Rotation as R
-
-LEVER = np.array([0.0, 0.0, 0.301])            # base_footprint -> livox_frame
-
-def lidar_in_world(x, y, z, qx, qy, qz, qw):
-    rot = R.from_quat([qx, qy, qz, qw])
-    return rot, np.array([x, y, z]) + rot.apply(LEVER)
-
-rot0, pos0 = lidar_in_world(*gt[0][1:])        # pose do lidar em t0
-if GRAVITY_ALIGNED_MAP:                        # mapa do algoritmo com z na vertical
-    rot0 = R.from_euler('z', rot0.as_euler('zyx')[0])
-
-truth_in_map = []
-for t, *pose in gt:
-    rot, pos = lidar_in_world(*pose)
-    truth_in_map.append((t, rot0.inv().apply(pos - pos0), (rot0.inv() * rot).as_quat()))
-```
-
-Cuidados:
-
-- Rode o algoritmo com `use_sim_time:=true`, senao os carimbos dele nao casam com os da pose verdadeira.
-- Ferramentas como `evo_ape --align` estimam a origem do mapa por ajuste de trajetoria e dispensam o passo 2. O passo 1 continua necessario: um ajuste rigido nao absorve um braco que gira junto com o robo.
-- `/odom` tambem comeca em zero no spawn e e plano. Ele nao serve de referencia, so de entrada para algoritmos que usam odometria de rodas.
-- Se mudar `livox_xyz` ou `livox_rpy`, o braco muda junto.
 
 ## Fidelidade ao modelo oficial
 
