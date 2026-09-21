@@ -28,10 +28,22 @@ PKG = 'limo_cerrado_sim'
 WORLD_NAME = 'cerrado'
 ROBOT_NAME = 'limo'
 # variante -> (arquivo do mundo, nome do modelo)
+# variante -> (arquivo do mundo, modelo incluido pelo mundo, modelo que contem as malhas)
 VARIANTS = {
-    '15': ('cerrado_15.sdf', 'cerrado_32x32_15_arvores'),
-    '68': ('cerrado_68.sdf', 'cerrado_32x32'),
+    '15': ('cerrado_15.sdf', 'cerrado_32x32_15_arvores', 'cerrado_32x32_15_arvores'),
+    # a casca cerrado_32x32_limo (neste pacote) usa as malhas do modelo original, que nao e copiado
+    '68': ('cerrado_68.sdf', 'cerrado_32x32_limo', 'cerrado_32x32'),
 }
+# topicos ROS da camera por modelo (os mesmos dos drivers reais); usados para gerar a nuvem
+CAMERA_TOPICS = {
+    'd435': {'color': '/camera/camera/color/image_raw', 'info': '/camera/camera/color/camera_info',
+             'depth': '/camera/camera/aligned_depth_to_color/image_raw',
+             'points': '/camera/camera/depth/color/points'},
+    'dabai': {'color': '/camera/color/image_raw', 'info': '/camera/color/camera_info',
+              'depth': '/camera/depth/image_raw', 'points': '/camera/depth/points'},
+}
+GRASS_FLAG = 65536          # visibility_flags do visual do capim nos modelos
+MASK_ALL = 0xFFFFFFFF
 # o modelo de 68 arvores (~500 MB) nao e copiado para o pacote; vem do diretorio original
 CERRADO68_MODELS_DEFAULT = '/root/cerrado_32x32/models'
 SPAWN_CLEARANCE = 0.06  # [m] solta o robo um pouco acima do solo
@@ -86,7 +98,7 @@ def launch_setup(context, *args, **kwargs):
     trees = arg('trees')
     if trees not in VARIANTS:
         raise RuntimeError(f"trees:={trees} invalido; use 15 ou 68")
-    world_file, model_name = VARIANTS[trees]
+    world_file, _included_model, model_name = VARIANTS[trees]
     world = arg('world') or os.path.join(share, 'worlds', world_file)
 
     resource_dirs = [os.path.join(share, 'models')]
@@ -143,8 +155,21 @@ def launch_setup(context, *args, **kwargs):
     xacro_cmd = ['xacro ', os.path.join(share, 'urdf', 'limo_pro_gz.urdf.xacro')]
     if arg('mode') not in ('track', 'diff'):
         raise RuntimeError(f"mode:={arg('mode')} invalido; use track ou diff")
+    mask = MASK_ALL if flag('lidar_sees_grass') else MASK_ALL & ~GRASS_FLAG
+    xacro_cmd += [f' lidar_visibility_mask:={mask}']
+    # ---- modelo do Livox: o padrao real precisa do CSV (scripts/fetch_livox_pattern.sh) ----
+    livox_model = arg('livox_model')
+    if livox_model not in ('mid360', 'grid'):
+        raise RuntimeError(f"livox_model:={livox_model} invalido; use mid360 ou grid")
+    pattern = os.path.join(share, 'config', 'livox', 'mid360-real-centr.csv')
+    if flag('use_livox') and livox_model == 'mid360' and not os.path.isfile(pattern):
+        info.append(LogInfo(msg='[limo_cerrado] AVISO: padrao do MID-360 ausente (rode scripts/fetch_livox_pattern.sh '
+                                'e recompile). Usando livox_model:=grid.'))
+        livox_model = 'grid'
+    xacro_cmd += [f' livox_model:={livox_model}']
     for name in ('mode', 'wheel_friction', 'steering_efficiency', 'use_livox', 'use_lidar2d', 'use_camera',
-                 'physical_inertia', 'detailed_collision', 'livox_xyz', 'livox_rpy'):
+                 'physical_inertia', 'detailed_collision', 'livox_xyz', 'livox_rpy',
+                 'camera_model', 'camera_rate', 'camera_xyz', 'camera_rpy'):
         xacro_cmd += [f' {name}:="', arg(name), '"']
     robot_description = ParameterValue(Command(xacro_cmd), value_type=str)
 
@@ -165,6 +190,43 @@ def launch_setup(context, *args, **kwargs):
     )
 
     actions = info + [gazebo, rsp, spawn, bridge]
+
+    # ---- Livox: ponte do modelo escolhido e, no modo mid360, o emulador do padrao real ----
+    if flag('use_livox'):
+        actions.append(Node(
+            package='ros_gz_bridge', executable='parameter_bridge', name='livox_bridge', output='screen',
+            parameters=[{'config_file': os.path.join(share, 'config', f'bridge_livox_{livox_model}.yaml'),
+                         'use_sim_time': True}],
+        ))
+        if livox_model == 'mid360':
+            lx, ly, lz = (float(c) for c in arg('livox_xyz').split())
+            actions.append(Node(
+                package=PKG, executable='livox_mid360_emulator', output='screen',
+                parameters=[{'use_sim_time': True, 'pattern_file': pattern, 'format': arg('livox_format'),
+                             'motion_distortion': flag('livox_motion_distortion'),
+                             # base_footprint -> livox_frame (o base_link fica 0.15 m acima do base_footprint)
+                             'base_to_sensor_xyz': [lx, ly, lz + 0.15],
+                             'base_to_sensor_rpy': [float(c) for c in arg('livox_rpy').split()]}],
+            ))
+
+    # ---- camera RGB-D: ponte propria + nuvem gerada da profundidade (frame optico correto) ----
+    if flag('use_camera'):
+        model = arg('camera_model')
+        if model not in CAMERA_TOPICS:
+            raise RuntimeError(f"camera_model:={model} invalido; use {' ou '.join(CAMERA_TOPICS)}")
+        topics = CAMERA_TOPICS[model]
+        actions.append(Node(
+            package='ros_gz_bridge', executable='parameter_bridge', name='camera_bridge', output='screen',
+            parameters=[{'config_file': os.path.join(share, 'config', f'bridge_camera_{model}.yaml'),
+                         'use_sim_time': True}],
+        ))
+        if flag('camera_pointcloud'):
+            actions.append(Node(
+                package='depth_image_proc', executable='point_cloud_xyzrgb_node', name='camera_pointcloud',
+                output='log', parameters=[{'use_sim_time': True}],
+                remappings=[('rgb/image_rect_color', topics['color']), ('rgb/camera_info', topics['info']),
+                            ('depth_registered/image_rect', topics['depth']), ('points', topics['points'])],
+            ))
 
     if arg('zenoh_router') == 'true' or (arg('zenoh_router') == 'auto' and zenoh_router_needed()):
         actions.insert(0, LogInfo(msg='[limo_cerrado] RMW=rmw_zenoh_cpp sem roteador: subindo rmw_zenohd'))
@@ -199,9 +261,18 @@ def generate_launch_description():
         ('headless_rendering', 'false', 'renderizacao EGL sem display (com gui:=false)'),
         ('gz_verbosity', '2', 'verbosidade do gz sim (0-4)'),
         ('zenoh_router', 'auto', 'auto | true | false: sobe o rmw_zenohd se o RMW for zenoh e nao houver roteador'),
+        ('lidar_sees_grass', 'false', 'false = capim invisivel aos lidars (continua visivel na GUI e nas cameras)'),
         ('use_livox', 'true', 'Livox MID-360 em /livox/lidar e /livox/imu'),
+        ('livox_model', 'mid360', 'mid360 = padrao de varredura real + tempo por ponto; grid = grade uniforme simples'),
+        ('livox_format', 'pointcloud2', 'pointcloud2 (XYZRTLT, xfer_format 0 do driver) ou custom (livox_ros_driver2/CustomMsg)'),
+        ('livox_motion_distortion', 'true', 'distorcao de movimento coerente com o tempo de cada ponto'),
         ('use_lidar2d', 'true', 'lidar 2D de fabrica (EAI T-mini Pro) em /scan'),
-        ('use_camera', 'false', 'camera de profundidade de fabrica (Orbbec Dabai) em /camera/*'),
+        ('use_camera', 'true', 'camera RGB-D'),
+        ('camera_model', 'd435', 'd435 = RealSense D435/D435i em /camera/camera/*; dabai = Orbbec Dabai em /camera/*'),
+        ('camera_rate', '30', 'taxa da camera [Hz]'),
+        ('camera_pointcloud', 'true', 'gera a nuvem colorida a partir da profundidade (depth_image_proc)'),
+        ('camera_xyz', '0.084 0 0.03', 'posicao da camera em relacao ao base_link'),
+        ('camera_rpy', '0 0 0', 'orientacao da camera em relacao ao base_link'),
         ('physical_inertia', 'false', 'true = inercia de caixa homogenea; false = inercia do URDF oficial'),
         ('detailed_collision', 'false', 'true = colisao da base seguindo o mesh; false = caixa do URDF oficial'),
         ('livox_xyz', '0.0 0.0 0.151', 'posicao do MID-360 em relacao ao base_link'),

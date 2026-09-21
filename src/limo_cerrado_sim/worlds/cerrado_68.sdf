@@ -4,7 +4,7 @@
     <!--
       Cerrado 32 x 32 m (68 arvores) para robo terrestre (LIMO Pro).
       Terreno em malha com relevo de 0 a 2,7 m (x/y em [-16, 16]); nao ha chao fora do quadrado.
-      Modelo: model://cerrado_32x32 (GZ_SIM_RESOURCE_PATH e ajustado pelo launch).
+      Modelo: model://cerrado_32x32_limo, casca que usa as malhas de model://cerrado_32x32 (GZ_SIM_RESOURCE_PATH e ajustado pelo launch).
     -->
     <physics name="2ms" type="ignored">
       <max_step_size>0.002</max_step_size>
@@ -37,7 +37,7 @@
     </light>
 
     <include>
-      <uri>model://cerrado_32x32</uri>
+      <uri>model://cerrado_32x32_limo</uri>
       <name>cerrado</name>
       <pose>0 0 0 0 0 0</pose>
     </include>

@@ -40,9 +40,14 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 | `z` | `auto` | Altura lida do mesh do terreno; o robo nasce alinhado a inclinacao local. |
 | `gui`, `rviz` | `true`, `false` | GUI do Gazebo e RViz. |
 | `nvidia` | `true` | Renderiza na GPU NVIDIA (PRIME offload). |
-| `use_livox` | `true` | Livox MID-360. |
+| `lidar_sees_grass` | `false` | `false` = o capim fica invisivel para o Livox e para o lidar 2D. A GUI e a camera continuam vendo. |
+| `use_livox` | `true` | Livox MID-360. Ver a secao propria para `livox_model`, `livox_format` e `livox_motion_distortion`. |
 | `use_lidar2d` | `true` | Lidar 2D de fabrica (EAI T-mini Pro). |
-| `use_camera` | `false` | Camera de profundidade de fabrica (Orbbec Dabai). |
+| `use_camera` | `true` | Camera RGB-D. Custa cerca de 6% do tempo real; `false` devolve 1,0. |
+| `camera_model` | `d435` | `d435` = Intel RealSense D435/D435i; `dabai` = Orbbec Dabai, a do manual do LIMO Pro. |
+| `camera_rate` | `30` | Taxa da camera em Hz. |
+| `camera_pointcloud` | `true` | Gera a nuvem colorida a partir da profundidade. |
+| `camera_xyz`, `camera_rpy` | `0.084 0 0.03`, `0 0 0` | Montagem da camera em relacao ao `base_link` (padrao: a do modelo oficial). |
 | `livox_xyz`, `livox_rpy` | `0 0 0.151`, `0 0 0` | Montagem do MID-360 em relacao ao `base_link` (padrao: topo da carenagem). |
 | `physical_inertia` | `false` | `true` = inercia de caixa homogenea; `false` = inercia do URDF oficial. |
 | `detailed_collision` | `false` | `true` = colisao da base seguindo o mesh; `false` = caixa do URDF oficial. |
@@ -56,11 +61,13 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 | `/cmd_vel` | `geometry_msgs/Twist` | comando (limite 1 m/s, como o LIMO) |
 | `/odom`, `/tf` (`odom -> base_footprint`) | `nav_msgs/Odometry` | odometria do plugin de tracao (esteiras ou rodas) |
 | `/ground_truth/odom` | `nav_msgs/Odometry` | pose verdadeira 3D no mundo |
-| `/livox/lidar` | `sensor_msgs/PointCloud2` | MID-360, frame `livox_frame`, 10 Hz |
+| `/livox/lidar` | `PointCloud2` (ou `CustomMsg`) | MID-360 com padrao de varredura real e tempo por ponto, frame `livox_frame`, 10 Hz |
 | `/livox/imu` | `sensor_msgs/Imu` | IMU do MID-360, 200 Hz |
 | `/scan` | `sensor_msgs/LaserScan` | T-mini Pro, frame `laser_link` |
 | `/imu` | `sensor_msgs/Imu` | IMU de fabrica (HI226), 100 Hz |
-| `/camera/*` | imagens, `CameraInfo`, nuvem | Dabai, so com `use_camera:=true` |
+| `/camera/camera/color/image_raw`, `.../color/camera_info` | `Image` rgb8, `CameraInfo` | RealSense, cor 640x480, 30 Hz |
+| `/camera/camera/aligned_depth_to_color/image_raw`, `/camera/camera/depth/image_rect_raw` | `Image` 32FC1 | profundidade em metros, ja alinhada a cor |
+| `/camera/camera/depth/color/points` | `PointCloud2` xyz + rgb | nuvem colorida, frame optico |
 | `/joint_states`, `/robot_description` | | rodas (so no modo `diff`) e modelo para o RViz |
 
 ## Pose verdadeira e comparacao com SLAM/LIO
@@ -118,8 +125,58 @@ Leituras:
 
 ## Livox MID-360
 
-Aproximado com `gpu_lidar`: 360 x 59 graus (-7 a +52), 0,1 a 40 m, 10 Hz, 500 x 40 = 20 mil pontos por quadro, mais a IMU interna a 200 Hz. Limites: a varredura e em grade uniforme, nao o padrao nao repetitivo do sensor real; a mensagem e `PointCloud2` com campos `x y z intensity ring`, sem tempo por ponto e sem `livox_ros_driver2/CustomMsg`; a IMU sai em m/s^2 (o driver real publica em g). Isso importa para Point-LIO/FAST-LIO. Num campo aberto cerca de 17% dos raios retornam; o resto aponta para o ceu.
+O gz-sim so tem lidar em grade uniforme, e o plugin de simulacao do MID-360 do CTU-MRS (derivado do da Livox) e para Gazebo Classic e ROS Noetic: nao carrega no Harmonic. O que se aproveita dele e o **padrao de varredura real** do sensor, um CSV com 800 mil direcoes (4 s a 200 mil pontos por segundo). O modelo padrao, `livox_model:=mid360`, funciona assim:
+
+1. O `gpu_lidar` renderiza uma grade densa de 1201 x 199 raios (0,3 grau por celula) no campo de visao exato do sensor, -7,21 a +52,16 graus. Ela sai em `/livox/dense_points`, de uso interno.
+2. O no `livox_mid360_emulator` (C++, `src/`) amostra essa grade nas proximas 20 mil direcoes do padrao a cada quadro de 0,1 s, carimba cada ponto com o seu tempo de captura (5 us por ponto) e publica `/livox/lidar` no formato do `livox_ros_driver2`.
+3. **Distorcao de movimento.** O Gazebo renderiza o quadro num instante so, mas os pontos saem com tempos espalhados por 0,1 s. Um LIO corrige a nuvem por esses tempos; se a geometria fosse instantanea, a correcao a estragaria. Por isso cada ponto e reexpresso no referencial do sensor no seu instante de captura, usando a pose verdadeira do robo. O quadro e publicado ao fim da janela, 0,1 s depois do carimbo, como no sensor real.
+
+| Argumento | Padrao | Efeito |
+|---|---|---|
+| `livox_model` | `mid360` | `mid360` = padrao real + tempo por ponto; `grid` = grade uniforme 500 x 40, sem tempo por ponto. |
+| `livox_format` | `pointcloud2` | `pointcloud2` = campos `x y z intensity tag line timestamp`, 26 bytes por ponto, igual ao `xfer_format 0` do driver. `custom` = `livox_ros_driver2/CustomMsg`, igual ao `xfer_format 1`. |
+| `livox_motion_distortion` | `true` | Desligue para obter a nuvem instantanea (os tempos por ponto continuam nominais). |
+
+Medido numa area com objetos, contra a geometria real do cenario (pontos a mais de 3 m):
+
+| Situacao | Erro mediano | p90 |
+|---|---|---|
+| Parado | 1,9 cm | 4,2 cm |
+| Girando a 1 rad/s, sem corrigir | 4,3 cm | 11,7 cm |
+| Girando a 1 rad/s, cada ponto na pose do seu proprio carimbo | 1,9 cm | 4,2 cm |
+
+A ultima linha igual a primeira mostra que a distorcao e exatamente a que os carimbos descrevem. Entre quadros consecutivos so 8% das direcoes se repetem (numa grade seriam 100%), e 10 quadros cobrem 6,4 vezes mais direcoes que 1.
+
+O que continua diferente do sensor real: a direcao de cada ponto e arredondada para a celula de 0,3 grau mais proxima; `intensity`/`reflectivity` e constante (100); pontos sem retorno sao omitidos; a IMU (`/livox/imu`) sai em m/s^2 (o driver real publica em g) e fica no mesmo ponto do lidar, entao a extrinseca IMU-lidar de um LIO deve ser zero na simulacao.
+
+O CSV do padrao (25 MB) nao e versionado: o fork de onde ele vem nao declara licenca. O `build.sh` o baixa com `scripts/fetch_livox_pattern.sh` na primeira compilacao. Sem ele o launch avisa e usa `livox_model:=grid`. Para `livox_format:=custom` o pacote precisa ser compilado com o `livox_ros_driver2` no ambiente.
+
+Custo em tempo real, sem GUI: 1,00 so com os lidars; 0,94 so com a camera; 0,87 com tudo ligado, que e o padrao.
+
+## Capim e lidar
+
+O capim do mundo e so visual: 2775 touceiras de fitas finas, sem colisao. O robo atravessa, mas um lidar renderizado o enxerga como parede. Numa moita, 52% dos pontos do Livox e 66% dos pontos do lidar 2D eram capim, o que encheria de obstaculos falsos qualquer mapa de custo.
+
+Por isso o capim esta num visual proprio (`grass`) com `visibility_flags = 65536`, e os dois lidars tem `visibility_mask` sem esse bit. `lidar_sees_grass:=true` devolve a mascara completa.
+
+Medido no mesmo ponto, classificando cada ponto pelo objeto real mais proximo:
+
+| | Capim visivel | Capim invisivel |
+|---|---|---|
+| Livox: pontos em capim, a mais de 8 cm do solo | 4737 | 150 |
+| Lidar 2D: pontos em capim, a mais de 8 cm do solo | 316 | 26 |
+| Camera de profundidade: pontos em capim | 8380 | 8380 |
+
+Os poucos pontos que sobram sao folhas de arbusto coladas em laminas de capim, rotuladas pelo vizinho mais proximo. Com o capim fora, os raios passam e atingem o que esta atras: os pontos em solo sobem de 10% para 29% e em arbustos de 29% para 48%.
+
+Cuidado: no campo real o lidar ve o capim. Ajuste o algoritmo com `false` e teste a robustez com `true`. Folhas de arvores e arbustos continuam visiveis aos lidars nos dois casos.
+
+Para o mundo de 68 arvores o pacote traz uma casca, `models/cerrado_32x32_limo`, que usa as malhas de `/root/cerrado_32x32` sem altera-lo. Se o original for regenerado, recrie a casca.
+
+### Raios sem retorno: `-inf` atras, `+inf` na frente
+
+Na nuvem do Livox, um raio sem retorno sai como `+inf` na metade dianteira do sensor e como `-inf` na metade traseira. Numa clareira aberta, 96% dos raios traseiros e 0% dos dianteiros sao `-inf`. Nao ha nada bloqueando o sensor: a metade traseira devolve pontos validos quando ha objetos. E uma particularidade do `gpu_lidar` com 360 graus. Quem descarta valores nao finitos, como o RViz, nao e afetado. Quem distingue os dois sinais, por exemplo para limpar espaco livre num mapa de custo, deve tratar os dois como "sem retorno".
 
 ## Mundo
 
-`worlds/cerrado_15.sdf` e `cerrado_68.sdf`: terreno em malha de 32 x 32 m (x/y em [-16, 16]), relevo de 0 a 2,7 m, inclinacao mediana de 7 graus e maxima de 30. Nao ha chao fora do quadrado: o robo cai se sair da borda. Troncos, galhos, raizes, arbustos e galhos caidos tem colisao; folhas e capim sao so visuais.
+`worlds/cerrado_15.sdf` e `cerrado_68.sdf`: terreno em malha de 32 x 32 m (x/y em [-16, 16]), relevo de 0 a 2,7 m, inclinacao mediana de 7 graus e maxima de 30. Nao ha chao fora do quadrado: o robo cai se sair da borda. Troncos, galhos, raizes, arbustos e galhos caidos tem colisao; folhas e capim sao so visuais (ver "Capim e lidar").

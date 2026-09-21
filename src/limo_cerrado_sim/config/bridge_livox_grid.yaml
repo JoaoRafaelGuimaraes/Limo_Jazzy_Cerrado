@@ -1,0 +1,6 @@
+# livox_model:=grid: a grade uniforme do gpu_lidar vai direto para /livox/lidar
+- ros_topic_name: "/livox/lidar"
+  gz_topic_name: "/livox/lidar/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS

@@ -1,0 +1,7 @@
+# livox_model:=mid360: grade densa, de uso interno. O no livox_mid360_emulator a amostra no padrao real
+# do sensor e publica /livox/lidar. Nao use /livox/dense_points nos seus algoritmos.
+- ros_topic_name: "/livox/dense_points"
+  gz_topic_name: "/livox/dense/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS

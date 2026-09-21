@@ -29,6 +29,20 @@ Visualization Manager:
       Color Transformer: AxisColor
       Axis: Z
       Decay Time: 0
+    - Class: rviz_default_plugins/Image
+      Name: RealSense cor
+      Enabled: true
+      Topic:
+        Value: /camera/camera/color/image_raw
+    - Class: rviz_default_plugins/PointCloud2
+      Name: RealSense nuvem
+      Enabled: false
+      Topic:
+        Value: /camera/camera/depth/color/points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: RGB8
     - Class: rviz_default_plugins/LaserScan
       Name: Scan 2D (T-mini Pro)
       Enabled: true

@@ -26,7 +26,13 @@
   <xacro:arg name="mode"               default="track"/>
   <xacro:arg name="use_livox"          default="true"/>
   <xacro:arg name="use_lidar2d"        default="true"/>
-  <xacro:arg name="use_camera"         default="false"/>
+  <xacro:arg name="use_camera"         default="true"/>
+  <!-- camera RGB-D: "d435" = Intel RealSense D435/D435i; "dabai" = Orbbec Dabai (a do manual do LIMO Pro) -->
+  <xacro:arg name="camera_model"       default="d435"/>
+  <xacro:arg name="camera_rate"        default="30"/>
+  <!-- pose da camera sobre o base_link. Padrao = pose do modelo oficial (ugv_gazebo_sim). -->
+  <xacro:arg name="camera_xyz"         default="0.084 0 0.03"/>
+  <xacro:arg name="camera_rpy"         default="0 0 0"/>
   <xacro:arg name="physical_inertia"   default="false"/>
   <xacro:arg name="detailed_collision" default="false"/>
   <!-- modo diff: "skid" = atrito lateral reduzido no eixo da roda (padrao); "official" = atrito do URDF
@@ -40,9 +46,15 @@
        Padrao: sensor apoiado no topo da carenagem (0.254 m) + 0.047 m ate o centro optico. -->
   <xacro:arg name="livox_xyz" default="0.0 0.0 0.151"/>
   <xacro:arg name="livox_rpy" default="0 0 0"/>
+  <!-- livox_model: "mid360" = grade densa (0.3 grau) que o no livox_mid360_emulator amostra no padrao de
+       varredura real do sensor; "grid" = grade uniforme 500x40 publicada direto (modelo simples). -->
+  <xacro:arg name="livox_model" default="mid360"/>
   <xacro:arg name="livox_h_samples" default="500"/>
   <xacro:arg name="livox_v_samples" default="40"/>
   <xacro:arg name="livox_rate"      default="10"/>
+  <!-- mascara de visibilidade dos lidars. 4294967295 = veem tudo; 4294901759 = tudo menos o capim
+       (o capim do mundo tem visibility_flags 65536). O launch escolhe via lidar_sees_grass. -->
+  <xacro:arg name="lidar_visibility_mask" default="4294901759"/>
 
   <xacro:include filename="$(find limo_description)/urdf/limo_xacro.xacro"/>
 
@@ -123,7 +135,7 @@
   </xacro:limo_laser>
 
   <xacro:limo_depth_camera parent_prefix="base_link" frame_prefix="depth_camera">
-    <origin xyz="0.084 0 0.03" rpy="0 0 0"/>
+    <origin xyz="$(arg camera_xyz)" rpy="$(arg camera_rpy)"/>
   </xacro:limo_depth_camera>
 
   <xacro:limo_imu parent_prefix="base_link" frame_prefix="imu">
@@ -359,31 +371,41 @@
     </joint>
 
     <gazebo reference="livox_frame">
-      <!--
-        MID-360: 360 x 59 graus (-7 a +52), 0.1 a 40 m (10% de refletividade), 10 Hz,
-        ~200 mil pontos/s => ~20 mil por quadro (500 x 40). O gz-sim so varre em grade uniforme:
-        o padrao nao repetitivo (roseta) do sensor real NAO e reproduzido.
-      -->
+      <xacro:property name="lm" value="$(arg livox_model)"/>
+      <xacro:if value="${lm == 'mid360'}">
+        <!-- grade densa: 1201 x 199 raios = 0.3 grau por celula, no campo de visao exato do padrao real
+             (-7.21 a +52.16 graus). Sai so no Gazebo (livox/dense); quem publica /livox/lidar e o emulador. -->
+        <xacro:property name="l_topic" value="livox/dense"/>
+        <xacro:property name="l_h" value="1201"/><xacro:property name="l_v" value="199"/>
+        <xacro:property name="l_vmin" value="-0.125838"/><xacro:property name="l_vmax" value="0.910364"/>
+      </xacro:if>
+      <xacro:if value="${lm == 'grid'}">
+        <!-- modelo simples: 360 x 59 graus (-7 a +52), ~20 mil pontos por quadro em grade uniforme -->
+        <xacro:property name="l_topic" value="livox/lidar"/>
+        <xacro:property name="l_h" value="$(arg livox_h_samples)"/><xacro:property name="l_v" value="$(arg livox_v_samples)"/>
+        <xacro:property name="l_vmin" value="-0.12217"/><xacro:property name="l_vmax" value="0.90757"/>
+      </xacro:if>
       <sensor name="livox_mid360" type="gpu_lidar">
         <pose>0 0 0 0 0 0</pose>
-        <topic>livox/lidar</topic>
+        <topic>${l_topic}</topic>
         <gz_frame_id>livox_frame</gz_frame_id>
         <update_rate>$(arg livox_rate)</update_rate>
         <always_on>true</always_on>
         <visualize>false</visualize>
         <lidar>
+          <visibility_mask>$(arg lidar_visibility_mask)</visibility_mask>
           <scan>
             <horizontal>
-              <samples>$(arg livox_h_samples)</samples>
+              <samples>${l_h}</samples>
               <resolution>1</resolution>
-              <min_angle>-3.14159</min_angle>
-              <max_angle>3.14159</max_angle>
+              <min_angle>-3.14159265</min_angle>
+              <max_angle>3.14159265</max_angle>
             </horizontal>
             <vertical>
-              <samples>$(arg livox_v_samples)</samples>
+              <samples>${l_v}</samples>
               <resolution>1</resolution>
-              <min_angle>-0.12217</min_angle>
-              <max_angle>0.90757</max_angle>
+              <min_angle>${l_vmin}</min_angle>
+              <max_angle>${l_vmax}</max_angle>
             </vertical>
           </scan>
           <range>
@@ -430,6 +452,7 @@
         <always_on>true</always_on>
         <visualize>false</visualize>
         <lidar>
+          <visibility_mask>$(arg lidar_visibility_mask)</visibility_mask>
           <scan>
             <horizontal>
               <samples>667</samples>
@@ -468,19 +491,37 @@
     </sensor>
   </gazebo>
 
-  <!-- ===== camera de profundidade de fabrica: Orbbec Dabai (640x400, 67.9 graus, 0.3 a 3 m) ===== -->
+  <!-- ===== camera RGB-D =====
+       O gz-sim tem UMA camera para cor e profundidade, entao a profundidade ja sai alinhada a cor
+       (como o topico aligned_depth_to_color da RealSense) e o campo de visao e o da cor.
+         d435 : RealSense D435/D435i. Cor 69 x 42 graus, 640x480. Profundidade util 0.28 a 10 m.
+         dabai: Orbbec Dabai (manual do LIMO Pro). 67.9 graus, 640x400, profundidade 0.3 a 3 m.
+       Frames: imagens e camera_info saem no frame optico "depth_link" (z para frente), como exige o
+       ROS. A nuvem NAO vem do gz (ele a gera com x para frente, mas rotulada com o frame optico);
+       o launch a produz a partir da profundidade com depth_image_proc, como faz o driver real. -->
   <xacro:if value="$(arg use_camera)">
+    <xacro:property name="cam" value="$(arg camera_model)"/>
+    <xacro:if value="${cam == 'd435'}">
+      <xacro:property name="cam_w" value="640"/><xacro:property name="cam_h" value="480"/>
+      <xacro:property name="cam_hfov" value="1.2043"/>
+      <xacro:property name="cam_dnear" value="0.28"/><xacro:property name="cam_dfar" value="10.0"/>
+    </xacro:if>
+    <xacro:if value="${cam == 'dabai'}">
+      <xacro:property name="cam_w" value="640"/><xacro:property name="cam_h" value="400"/>
+      <xacro:property name="cam_hfov" value="1.1851"/>
+      <xacro:property name="cam_dnear" value="0.3"/><xacro:property name="cam_dfar" value="3.0"/>
+    </xacro:if>
     <gazebo reference="depth_camera_link">
-      <sensor name="dabai" type="rgbd_camera">
+      <sensor name="rgbd_${cam}" type="rgbd_camera">
         <topic>camera</topic>
         <gz_frame_id>depth_link</gz_frame_id>
-        <update_rate>15</update_rate>
+        <update_rate>$(arg camera_rate)</update_rate>
         <always_on>true</always_on>
         <camera>
-          <horizontal_fov>1.1851</horizontal_fov>
-          <image><width>640</width><height>400</height><format>R8G8B8</format></image>
+          <horizontal_fov>${cam_hfov}</horizontal_fov>
+          <image><width>${cam_w}</width><height>${cam_h}</height><format>R8G8B8</format></image>
           <clip><near>0.05</near><far>60.0</far></clip>
-          <depth_camera><clip><near>0.3</near><far>3.0</far></clip></depth_camera>
+          <depth_camera><clip><near>${cam_dnear}</near><far>${cam_dfar}</far></clip></depth_camera>
         </camera>
       </sensor>
     </gazebo>

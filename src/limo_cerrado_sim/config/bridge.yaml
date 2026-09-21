@@ -38,13 +38,7 @@
   gz_type_name: "gz.msgs.Odometry"
   direction: GZ_TO_ROS
 
-# Livox MID-360 (aproximado com gpu_lidar)
-- ros_topic_name: "/livox/lidar"
-  gz_topic_name: "/livox/lidar/points"
-  ros_type_name: "sensor_msgs/msg/PointCloud2"
-  gz_type_name: "gz.msgs.PointCloudPacked"
-  direction: GZ_TO_ROS
-
+# A nuvem do Livox tem ponte propria: config/bridge_livox_<modelo>.yaml (escolhida por livox_model)
 - ros_topic_name: "/livox/imu"
   gz_topic_name: "/livox/imu"
   ros_type_name: "sensor_msgs/msg/Imu"
@@ -64,26 +58,4 @@
   gz_type_name: "gz.msgs.IMU"
   direction: GZ_TO_ROS
 
-- ros_topic_name: "/camera/color/image_raw"
-  gz_topic_name: "/camera/image"
-  ros_type_name: "sensor_msgs/msg/Image"
-  gz_type_name: "gz.msgs.Image"
-  direction: GZ_TO_ROS
-
-- ros_topic_name: "/camera/depth/image_raw"
-  gz_topic_name: "/camera/depth_image"
-  ros_type_name: "sensor_msgs/msg/Image"
-  gz_type_name: "gz.msgs.Image"
-  direction: GZ_TO_ROS
-
-- ros_topic_name: "/camera/color/camera_info"
-  gz_topic_name: "/camera/camera_info"
-  ros_type_name: "sensor_msgs/msg/CameraInfo"
-  gz_type_name: "gz.msgs.CameraInfo"
-  direction: GZ_TO_ROS
-
-- ros_topic_name: "/camera/depth/points"
-  gz_topic_name: "/camera/points"
-  ros_type_name: "sensor_msgs/msg/PointCloud2"
-  gz_type_name: "gz.msgs.PointCloudPacked"
-  direction: GZ_TO_ROS
+# A camera RGB-D tem ponte propria: config/bridge_camera_<modelo>.yaml (so sobe com use_camera:=true)

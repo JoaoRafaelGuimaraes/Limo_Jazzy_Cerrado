@@ -2,7 +2,9 @@
 <sdf version="1.9"><model name="cerrado_32x32_15_arvores"><static>true</static><link name="environment"><visual name="terrain"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/terrain.dae</uri></mesh></geometry><cast_shadows>true</cast_shadows></visual>
 <visual name="wood"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/wood.dae</uri></mesh></geometry><cast_shadows>true</cast_shadows></visual>
 <visual name="canopy"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/canopy.dae</uri></mesh></geometry><cast_shadows>true</cast_shadows></visual>
-<visual name="litter"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/litter.dae</uri></mesh></geometry><cast_shadows>true</cast_shadows></visual>
+<visual name="litter"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/litter.dae</uri><submesh><name>scattered_leaf_litter</name><center>false</center></submesh></mesh></geometry><cast_shadows>true</cast_shadows></visual>
+<!-- capim: so visual (sem colisao). visibility_flags=65536 permite esconde-lo dos lidars (visibility_mask sem esse bit); GUI e cameras continuam vendo. -->
+<visual name="grass"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/litter.dae</uri><submesh><name>dry_grass_tussocks</name><center>false</center></submesh></mesh></geometry><cast_shadows>true</cast_shadows><visibility_flags>65536</visibility_flags></visual>
 <collision name="collision_0"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/terrain_collision.stl</uri></mesh></geometry><surface><friction><ode><mu>0.85</mu><mu2>0.85</mu2></ode></friction></surface></collision>
 <collision name="collision_3"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/tree_002_collision.stl</uri></mesh></geometry><surface><friction><ode><mu>0.85</mu><mu2>0.85</mu2></ode></friction></surface></collision>
 <collision name="collision_15"><geometry><mesh><uri>model://cerrado_32x32_15_arvores/meshes/tree_014_collision.stl</uri></mesh></geometry><surface><friction><ode><mu>0.85</mu><mu2>0.85</mu2></ode></friction></surface></collision>
