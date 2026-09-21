@@ -26,8 +26,7 @@ Em outro terminal (com o mesmo `source`), para dirigir:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-Feche qualquer outro Gazebo antes (a stack do MRS ou o `~/cerrado_32x32/launch.sh`):
-dois servidores `gz` no mesmo host disputam o `/clock`.
+
 
 ### Argumentos do launch
 
