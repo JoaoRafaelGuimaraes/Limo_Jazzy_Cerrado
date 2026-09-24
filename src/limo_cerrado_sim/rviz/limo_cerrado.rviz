@@ -53,6 +53,53 @@ Visualization Manager:
       Size (Pixels): 3
       Color Transformer: FlatColor
       Color: 255; 60; 60
+    # --- DEM do terrain_modelling -------------------------------------------
+    # Superficie: altura da camada 'elevation', cor pela 'variance'.
+    # QoS Best Effort para casar com o SensorDataQoS do publisher; um assinante
+    # Reliable nao recebe nada de um publisher Best Effort.
+    # Bounds de intensidade fixas de proposito: o prior da variancia e 1e4, e o
+    # autocompute jogaria todas as celulas observadas no mesmo extremo do arco-iris.
+    - Class: grid_map_rviz_plugin/GridMap
+      Name: DEM (elevation x variance)
+      Enabled: true
+      Topic:
+        Value: /terrain/obstacle_points_hag
+        Reliability Policy: Best Effort
+      Height Transformer: GridMapLayer
+      Height Layer: elevation
+      Color Transformer: IntensityLayer
+      Color Layer: variance
+      Use Rainbow: true
+      Invert Rainbow: false
+      Autocompute Intensity Bounds: false
+      Min Intensity: 0
+      Max Intensity: 1
+      Show Grid Lines: false
+      Alpha: 1
+      History Length: 1
+    # --- saidas do ground_segmentation ---------------------------------------
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Chao (ground_segmentation)
+      Enabled: true
+      Topic:
+        Value: /ground_segmentation/ground_points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 80; 200; 80
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Obstaculos (ground_segmentation)
+      Enabled: true
+      Topic:
+        Value: /ground_segmentation/obstacle_points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 255; 160; 40
+      Decay Time: 0
     - Class: rviz_default_plugins/Odometry
       Name: Odometria de rodas
       Enabled: true

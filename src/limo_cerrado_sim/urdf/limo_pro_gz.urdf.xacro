@@ -200,7 +200,10 @@
         <min_linear_acceleration>-2.0</min_linear_acceleration>
         <topic>/model/limo/cmd_vel</topic>
         <odom_topic>/model/limo/odom</odom_topic>
-        <tf_topic>/model/limo/tf</tf_topic>
+        <!-- TF de rodas desviada: e planar (roll=pitch=0) e criava torres no mapa de
+             elevacao. O odom -> base_footprint de /tf agora vem do OdometryPublisher 3D
+             logo abaixo. O topico /odom de rodas segue publicado, para comparacao. -->
+        <tf_topic>/model/limo/tf_wheel_unused</tf_topic>
         <frame_id>odom</frame_id>
         <child_frame_id>base_footprint</child_frame_id>
         <odom_publish_frequency>50</odom_publish_frequency>
@@ -316,7 +319,10 @@
         <angular_velocity><min_velocity>-3.0</min_velocity><max_velocity>3.0</max_velocity></angular_velocity>
         <topic>/model/limo/cmd_vel</topic>
         <odom_topic>/model/limo/odom</odom_topic>
-        <tf_topic>/model/limo/tf</tf_topic>
+        <!-- TF de rodas desviada: e planar (roll=pitch=0) e criava torres no mapa de
+             elevacao. O odom -> base_footprint de /tf agora vem do OdometryPublisher 3D
+             logo abaixo. O topico /odom de rodas segue publicado, para comparacao. -->
+        <tf_topic>/model/limo/tf_wheel_unused</tf_topic>
         <frame_id>odom</frame_id>
         <child_frame_id>base_footprint</child_frame_id>
         <odom_publish_frequency>50</odom_publish_frequency>
@@ -333,6 +339,25 @@
       </plugin>
     </gazebo>
   </xacro:if>
+
+  <!-- odom -> base_footprint com atitude completa (roll/pitch/z).
+       A odometria de rodas do DiffDrive e planar por construcao: ela integra velocidade de
+       roda e nao tem fonte de atitude, entao publica roll = pitch = 0. Um lidar inclinado com
+       uma TF que se diz nivelada joga o chao para cima em d*tan(theta) -> torres no grid.
+       Este plugin e ground truth do simulador: serve para validar o pipeline de mapeamento,
+       nao substitui fusao IMU+rodas (robot_localization) ou LIO no robo real.
+       Note que 'odom' aqui coincide com a origem do mundo do Gazebo, nao com o ponto de
+       spawn, ao contrario do /odom de rodas, que comeca em zero. -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <odom_topic>/model/limo/odom_3d</odom_topic>
+      <tf_topic>/model/limo/tf</tf_topic>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <dimensions>3</dimensions>
+    </plugin>
+  </gazebo>
 
   <!-- pose verdadeira no mundo (3D), para comparar com a odometria e com SLAM/LIO -->
   <gazebo>

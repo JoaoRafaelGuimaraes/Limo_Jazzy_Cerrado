@@ -60,7 +60,7 @@ class Mid360Emulator : public rclcpp::Node {
       throw std::runtime_error("format:=custom exige compilar com o pacote livox_ros_driver2 no ambiente");
 #endif
     } else {
-      pub_pc2_ = create_publisher<PointCloud2>("livox/lidar", rclcpp::SensorDataQoS());
+      pub_pc2_ = create_publisher<PointCloud2>("livox/lidar", 10);  // reliable, como o driver real: conecta com qualquer assinante
     }
     sub_dense_ = create_subscription<PointCloud2>("livox/dense_points", 10,
                                                   [this](PointCloud2::ConstSharedPtr m) { onDense(m); });

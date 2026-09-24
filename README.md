@@ -12,10 +12,32 @@ Workspace independente (ROS 2 Jazzy + Gazebo Harmonic). Nao usa nem altera o `mr
 
 `limo_base` e `limo_car` do repo oficial nao sao compilados: dependem do hardware e do Gazebo Classic.
 
-## Compilar e rodar
+## Instalacao rapida
+
+Requisitos: Ubuntu 24.04 e [ROS 2 Jazzy](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html).
+
+**1. Dependencias** (o `ros-jazzy-ros-gz` ja traz o Gazebo Harmonic):
 
 ```bash
-cd /root/limo_ws && ./build.sh
+sudo apt update
+sudo apt install git git-lfs curl python3-colcon-common-extensions \
+  ros-jazzy-ros-gz ros-jazzy-xacro ros-jazzy-robot-state-publisher \
+  ros-jazzy-joint-state-publisher ros-jazzy-rviz2 ros-jazzy-depth-image-proc \
+  ros-jazzy-teleop-twist-keyboard ros-jazzy-grid-map-rviz-plugin
+```
+
+**2. Clonar e compilar:**
+
+```bash
+git clone --recursive https://github.com/JoaoRafaelGuimaraes/Limo_Jazzy_Cerrado.git /root/limo_ws
+cd /root/limo_ws
+git lfs install && git lfs pull   # meshes do terreno e do robo
+./build.sh                        # compila e baixa o padrao de varredura do MID-360
+```
+
+**3. Rodar:**
+
+```bash
 source /root/limo_ws/install/setup.bash
 ros2 launch limo_cerrado_sim limo_cerrado.launch.py
 ```
@@ -25,6 +47,8 @@ Em outro terminal (com o mesmo `source`), para dirigir:
 ```bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
+
+Para ver os sensores no RViz: `rviz:=true`.
 
 
 
@@ -59,7 +83,8 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 | Topico | Tipo | Origem |
 |---|---|---|
 | `/cmd_vel` | `geometry_msgs/Twist` | comando (limite 1 m/s, como o LIMO) |
-| `/odom`, `/tf` (`odom -> base_footprint`) | `nav_msgs/Odometry` | odometria do plugin de tracao (esteiras ou rodas) |
+| `/tf` (`odom -> base_footprint`) | `tf2_msgs/TFMessage` | pose 3D do robo (x, y, z, roll, pitch, yaw), ver "Odometria e TF" |
+| `/odom` | `nav_msgs/Odometry` | odometria de rodas/esteiras, plana. So para comparacao: nao vai para o TF |
 | `/ground_truth/odom` | `nav_msgs/Odometry` | pose verdadeira 3D no mundo |
 | `/livox/lidar` | `PointCloud2` (ou `CustomMsg`) | MID-360 com padrao de varredura real e tempo por ponto, frame `livox_frame`, 10 Hz |
 | `/livox/imu` | `sensor_msgs/Imu` | IMU do MID-360, 200 Hz |
@@ -70,6 +95,17 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 | `/camera/camera/depth/color/points` | `PointCloud2` xyz + rgb | nuvem colorida, frame optico |
 | `/joint_states`, `/robot_description` | | rodas (so no modo `diff`) e modelo para o RViz |
 
+## Odometria e TF
+
+**Por que importa.** O lidar mede cada ponto em relacao a si mesmo. Para montar um mapa, o TF `odom -> base_footprint` diz onde o robo esta e quanto ele esta inclinado. Se o TF errar a inclinacao, o mapa erra a altura dos pontos: com o robo inclinado 10 graus, um ponto a 10 m sai 1,76 m fora do lugar (`d * tan(10 graus)`).
+
+**O problema da odometria de rodas.** Ela conta o giro das rodas, entao sabe x, y e yaw, mas nao sabe se o robo esta numa rampa: sempre diz z = 0, roll = 0, pitch = 0. Neste terreno inclinado, isso cria picos falsos em qualquer mapa de elevacao.
+
+**O que a simulacao faz.** O TF `odom -> base_footprint` vem do plugin `OdometryPublisher` do Gazebo, com a pose 3D exata do robo. A odometria de rodas continua em `/odom`, so para comparacao.
+
+- A origem do `odom` e o centro do mundo do Gazebo, nao o ponto de spawn.
+- Isso e ground truth do simulador: serve para validar algoritmos de mapeamento. No robo real, use SLAM 3D com IMU (LIO, por exemplo FAST-LIO2) para obter z, roll e pitch.
+
 ## Pose verdadeira e comparacao com SLAM/LIO
 
 ### De onde vem o `/ground_truth/odom`
@@ -79,7 +115,7 @@ Nao vem de sensor nem de estimador. O motor de fisica do Gazebo conhece a pose e
 - `header.frame_id = world`: o referencial do mundo do Gazebo, o mesmo do SDF (x/y em [-16, 16], z para cima, origem no centro do terreno).
 - `child_frame_id = base_footprint`: o ponto no chao sob o centro do robo. **Nao e a pose do lidar.**
 - Carimbo em tempo de simulacao. So existe na simulacao; o robo real nao tem esse topico.
-- O referencial `world` nao entra no TF. O TF so tem `odom -> base_footprint`, da odometria das esteiras, que e plana (sem z, roll e pitch) e comeca em zero no ponto de spawn.
+- O referencial `world` nao entra no TF. Na simulacao, o `odom` do TF coincide com ele (ver "Odometria e TF").
 
 ### Onde o robo nasce
 
